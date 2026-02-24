@@ -4,6 +4,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from openpyxl import load_workbook
 
 router = APIRouter(prefix="/api/lists", tags=["lists"])
 
@@ -96,6 +97,31 @@ def delete_list(filename: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Errore durante l'eliminazione del file: {str(e)}")
 
+def _save_preserving_ricerche(filepath: str, df: pd.DataFrame):
+    """Saves df to the main sheet of the Excel file, preserving the _ricerche sheet."""
+    # Backup _ricerche sheet if it exists
+    searches_headers = []
+    searches_rows = []
+    try:
+        searches_df = pd.read_excel(filepath, sheet_name='_ricerche')
+        searches_headers = searches_df.columns.tolist()
+        searches_rows = searches_df.values.tolist()
+    except Exception:
+        pass  # Sheet doesn't exist yet
+
+    # Overwrite the file with the updated main sheet
+    df.to_excel(filepath, index=False, engine='openpyxl')
+
+    # Restore _ricerche sheet if it existed
+    if searches_headers:
+        wb = load_workbook(filepath)
+        ws = wb.create_sheet('_ricerche')
+        ws.append(searches_headers)
+        for row in searches_rows:
+            ws.append(row)
+        wb.save(filepath)
+
+
 class UpdateNoteRequest(BaseModel):
     place_id: str
     note: str
@@ -122,7 +148,7 @@ def update_note(filename: str, request: UpdateNoteRequest):
             raise HTTPException(status_code=404, detail=f"Riga con Place_ID={request.place_id} non trovata.")
 
         df.loc[mask, 'Note'] = request.note
-        df.to_excel(filepath, index=False, engine='openpyxl')
+        _save_preserving_ricerche(filepath, df)
 
         return {"message": "Nota aggiornata con successo"}
     except Exception as e:
@@ -174,9 +200,9 @@ def update_row(filename: str, request: UpdateRowRequest):
             raise HTTPException(status_code=404, detail=f"Riga con Place_ID={request.place_id} non trovata.")
             
         df.loc[mask, col_name] = request.value
-        
-        df.to_excel(filepath, index=False, engine='openpyxl')
-        
+
+        _save_preserving_ricerche(filepath, df)
+
         return {"message": f"Riga aggiornata con successo! {col_name}={request.value}"}
     except Exception as e:
         import traceback
