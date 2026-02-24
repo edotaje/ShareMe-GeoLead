@@ -184,6 +184,21 @@ def update_row(filename: str, request: UpdateRowRequest):
         raise HTTPException(status_code=500, detail=f"Errore durante l'aggiornamento del file: {str(e)}")
 
 
+@router.get("/{filename}/searches")
+def get_searches(filename: str):
+    """Returns the search history from the _ricerche sheet of the Excel list."""
+    filepath = os.path.join(LISTS_DIR, filename)
+
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Lista non trovata")
+
+    try:
+        df = pd.read_excel(filepath, sheet_name='_ricerche')
+        return df.fillna('').to_dict(orient='records')
+    except Exception:
+        return []  # Sheet doesn't exist yet
+
+
 @router.get("/{filename}/download")
 def download_list(filename: str):
     """Downloads the Excel file directly."""

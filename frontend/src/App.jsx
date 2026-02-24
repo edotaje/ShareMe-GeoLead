@@ -1,4 +1,79 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { MapContainer, TileLayer, Circle, CircleMarker, Marker, Tooltip, useMapEvents, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
+import L from 'leaflet';
+// Fix Leaflet default icon paths with Vite
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
+function MapInvalidator({ trigger }) {
+  const map = useMap();
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 50);
+    return () => clearTimeout(t);
+  }, [trigger, map]);
+  return null;
+}
+
+function MapClickHandler({ pickingMode, onPick }) {
+  const map = useMapEvents({
+    click(e) {
+      if (pickingMode) onPick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  useEffect(() => {
+    const container = map.getContainer();
+    container.style.cursor = pickingMode ? 'crosshair' : '';
+    return () => { container.style.cursor = ''; };
+  }, [pickingMode, map]);
+  return null;
+}
+
+const KEYWORD_COLORS = [
+  '#10b981', // emerald
+  '#f59e0b', // amber
+  '#ef4444', // red
+  '#8b5cf6', // violet
+  '#06b6d4', // cyan
+  '#ec4899', // pink
+  '#84cc16', // lime
+  '#a855f7', // purple
+  '#14b8a6', // teal
+  '#e11d48', // rose
+];
+
+function keywordColor(keyword) {
+  const key = (keyword || '').trim().toLowerCase();
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) {
+    hash = (hash * 31 + key.charCodeAt(i)) & 0xffffffff;
+  }
+  return KEYWORD_COLORS[Math.abs(hash) % KEYWORD_COLORS.length];
+}
+
+function generateGridPoints(centerLat, centerLng, radiusM, gridStepM) {
+  const points = [];
+  if (!radiusM || !gridStepM) return points;
+  const latStepDeg = gridStepM / 111320.0;
+  const numSteps = Math.ceil(radiusM / gridStepM);
+  for (let i = -numSteps; i <= numSteps; i++) {
+    for (let j = -numSteps; j <= numSteps; j++) {
+      const xOff = i * gridStepM;
+      const yOff = j * gridStepM;
+      if (Math.sqrt(xOff * xOff + yOff * yOff) <= radiusM) {
+        const lat = centerLat + (i * latStepDeg);
+        const lngStep = gridStepM / (111320.0 * Math.cos(lat * Math.PI / 180));
+        const lng = centerLng + (j * lngStep);
+        points.push([lat, lng]);
+      }
+    }
+  }
+  return points;
+}
 
 function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
@@ -25,9 +100,55 @@ function App() {
   const [ricercaFilter, setRicercaFilter] = useState('all');
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [nameSearch, setNameSearch] = useState('');
+  const [previewCenter, setPreviewCenter] = useState(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [pastSearches, setPastSearches] = useState([]);
+  const [pickingMode, setPickingMode] = useState(false);
+  const [mapFullscreen, setMapFullscreen] = useState(false);
   const logsEndRef = useRef(null);
+  const mapPanelRef = useRef(null);
   const dropdownRef = useRef(null);
   const filterDropdownRef = useRef(null);
+
+  const gridPoints = useMemo(() => {
+    if (!previewCenter) return [];
+    return generateGridPoints(previewCenter.lat, previewCenter.lng, parseInt(radius) || 0, parseInt(gridStep) || 500);
+  }, [previewCenter, radius, gridStep]);
+
+  const handlePreview = async () => {
+    if (!city) return;
+    const coordMatch = city.trim().match(/^(-?\d{1,3}(?:\.\d+)?)[,\s]+(-?\d{1,3}(?:\.\d+)?)$/);
+    if (coordMatch) {
+      setPreviewCenter({ lat: parseFloat(coordMatch[1]), lng: parseFloat(coordMatch[2]) });
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const res = await fetch(`http://localhost:8000/api/geocode?q=${encodeURIComponent(city)}`);
+      if (!res.ok) throw new Error('Località non trovata');
+      const data = await res.json();
+      setPreviewCenter({ lat: data.lat, lng: data.lng });
+    } catch (e) {
+      alert('Impossibile geocodificare la località');
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handlePickLocation = (lat, lng) => {
+    setCity(`${lat.toFixed(6)}, ${lng.toFixed(6)}`);
+    setPreviewCenter({ lat, lng });
+    setPickingMode(false);
+  };
+
+  const handleTogglePicking = () => {
+    if (pickingMode) { setPickingMode(false); return; }
+    // Open map at default Italy center if no location is set yet
+    if (!previewCenter && pastSearches.length === 0) {
+      setPreviewCenter({ lat: 41.9, lng: 12.5 });
+    }
+    setPickingMode(true);
+  };
 
   const fetchLists = async () => {
     try {
@@ -55,6 +176,21 @@ function App() {
     }
   };
 
+  const fetchSearchHistory = async (filename) => {
+    if (!filename) { setPastSearches([]); return; }
+    try {
+      const resp = await fetch(`http://localhost:8000/api/lists/${filename}/searches`);
+      if (resp.ok) {
+        const data = await resp.json();
+        setPastSearches(data);
+      } else {
+        setPastSearches([]);
+      }
+    } catch (e) {
+      setPastSearches([]);
+    }
+  };
+
   useEffect(() => {
     fetchLists();
   }, []);
@@ -67,12 +203,29 @@ function App() {
 
   useEffect(() => {
     fetchListData(selectedList);
+    fetchSearchHistory(selectedList);
   }, [selectedList]);
 
   useEffect(() => {
     // Auto-scroll logs
     logsEndRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [logs]);
+
+  useEffect(() => {
+    if (!pickingMode) return;
+    const cancelOnEsc = (e) => { if (e.key === 'Escape') setPickingMode(false); };
+    const cancelOnOutsideClick = (e) => {
+      if (mapPanelRef.current && !mapPanelRef.current.contains(e.target)) {
+        setPickingMode(false);
+      }
+    };
+    document.addEventListener('keydown', cancelOnEsc);
+    document.addEventListener('mousedown', cancelOnOutsideClick);
+    return () => {
+      document.removeEventListener('keydown', cancelOnEsc);
+      document.removeEventListener('mousedown', cancelOnOutsideClick);
+    };
+  }, [pickingMode]);
 
   useEffect(() => {
     // Close dropdown on outside click
@@ -280,6 +433,8 @@ function App() {
                     setResults(parsed.data);
                     setIsScraping(false);
                     setProgress({ value: 100, label: 'Completato!', subtype: 'done' });
+                    setPreviewCenter(null);
+                    fetchSearchHistory(selectedList);
                   }
                 } catch (err) {
                   console.error("Parse Error:", err, dataStr);
@@ -448,14 +603,30 @@ function App() {
           <form onSubmit={handleScrape} className="space-y-4 flex-1 flex flex-col">
             <div className="space-y-4 flex-1 overflow-y-auto pr-2 custom-scrollbar">
               <div>
-                <label className="block text-sm font-medium dark:text-slate-400 text-slate-600 mb-1">Città</label>
-                <input
-                  type="text"
-                  className="w-full dark:bg-slate-950 bg-white border dark:border-slate-700 border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-500 focus:border-slate-500 transition-colors"
-                  placeholder="Es: Milano"
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                />
+                <label className="block text-sm font-medium dark:text-slate-400 text-slate-600 mb-1">Città, Zona o Coordinate</label>
+                <div className="flex gap-1">
+                  <input
+                    type="text"
+                    className="flex-1 dark:bg-slate-950 bg-white border dark:border-slate-700 border-slate-300 rounded-lg px-4 py-2.5 text-sm focus:ring-2 focus:ring-slate-500 focus:border-slate-500 transition-colors"
+                    placeholder="Es: Navigli Milano, 45.4654,9.1866"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTogglePicking}
+                    title={pickingMode ? 'Annulla selezione (Esc)' : 'Seleziona centro sulla mappa'}
+                    className={`px-2.5 py-2.5 flex items-center justify-center rounded-lg border transition-all ${pickingMode
+                      ? 'bg-blue-500 border-blue-500 text-white shadow-lg scale-105'
+                      : 'dark:bg-slate-950 bg-white dark:border-slate-700 border-slate-300 dark:text-slate-300 text-slate-600 hover:border-blue-400 hover:text-blue-400'
+                      }`}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -494,11 +665,11 @@ function App() {
               </div>
             </div>
 
-            <div className="pt-4 shrink-0 mt-auto">
+            <div className="pt-4 shrink-0 mt-auto flex gap-2">
               <button
                 type="submit"
                 disabled={isScraping}
-                className={`w-full py-3 px-4 rounded-lg text-sm font-medium transition-all ${isScraping ? 'dark:bg-slate-800 bg-slate-100 text-slate-500 cursor-not-allowed border dark:border-slate-700/50 border-slate-300/50' : 'dark:bg-slate-700 bg-slate-200 dark:text-white text-slate-900 dark:hover:bg-slate-600 hover:bg-slate-300 border dark:border-slate-600 border-slate-400 shadow-xl'
+                className={`flex-1 py-3 px-4 rounded-lg text-sm font-medium transition-all ${isScraping ? 'dark:bg-slate-800 bg-slate-100 text-slate-500 cursor-not-allowed border dark:border-slate-700/50 border-slate-300/50' : 'dark:bg-slate-700 bg-slate-200 dark:text-white text-slate-900 dark:hover:bg-slate-600 hover:bg-slate-300 border dark:border-slate-600 border-slate-400 shadow-xl'
                   }`}
               >
                 {isScraping ? (
@@ -511,6 +682,24 @@ function App() {
                   </span>
                 ) : 'Avvia Estrazione'}
               </button>
+              <button
+                type="button"
+                onClick={handlePreview}
+                disabled={!city || previewLoading}
+                title="Anteprima Area"
+                className="flex items-center justify-center w-12 rounded-lg border dark:bg-slate-900 bg-slate-50 dark:border-slate-700 border-slate-300 dark:text-slate-300 text-slate-600 dark:hover:bg-slate-800 hover:bg-slate-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed shrink-0"
+              >
+                {previewLoading ? (
+                  <svg className="animate-spin w-5 h-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                )}
+              </button>
             </div>
           </form>
         </div>
@@ -519,20 +708,17 @@ function App() {
       {/* Main Content Area */}
       <div className="col-span-1 md:col-span-8 lg:col-span-9 flex flex-col gap-6 h-full overflow-hidden">
 
-        {/* Terminal Log View */}
-        <div className="dark:bg-[#0D1117] bg-white border dark:border-slate-800 border-slate-200 rounded-xl p-4 shadow-xl overflow-hidden flex flex-col md:h-[300px]">
-          <div className="flex items-center justify-between mb-3 border-b dark:border-slate-800 border-slate-200 pb-2">
-            <div className="flex gap-2 items-center">
-              <div className="w-3 h-3 rounded-full bg-red-500"></div>
-              <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
-              <div className="w-3 h-3 rounded-full bg-green-500"></div>
-              <span className="text-xs font-mono dark:text-slate-400 text-slate-600 ml-3">Algoritmo di Estrazione</span>
-            </div>
-            {isScraping && <span className="flex h-3 w-3"><span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span></span>}
-          </div>
+        {/* Top row: Terminal + Map side by side */}
+        <div className={`flex gap-6 ${mapFullscreen ? 'flex-1' : 'md:h-[320px]'}`}>
 
-          <div className="flex flex-1 overflow-hidden gap-4">
-            {/* Logs Area (approx 2/3 width) */}
+          {/* Terminal Log View */}
+          <div className={`flex-1 dark:bg-[#0D1117] bg-white border dark:border-slate-800 border-slate-200 rounded-xl p-4 shadow-xl overflow-hidden flex-col ${mapFullscreen ? 'hidden' : 'flex'}`}>
+            <div className="flex items-center justify-between mb-3 border-b dark:border-slate-800 border-slate-200 pb-2">
+              <div className="flex gap-2 items-center">
+                <span className="text-xs font-mono dark:text-slate-400 text-slate-600 ml-3">Algoritmo di Estrazione</span>
+              </div>
+              {isScraping && <span className="flex h-3 w-3"><span className="animate-ping absolute inline-flex h-3 w-3 rounded-full bg-green-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span></span>}
+            </div>
             <div className="flex-1 overflow-y-auto font-mono text-xs dark:text-white text-slate-900 leading-relaxed pr-2 custom-scrollbar">
               {logs.length === 0 ? (
                 <span className="text-slate-600">Inserisci i dati e avvia per vedere l'algoritmo qui.</span>
@@ -545,32 +731,154 @@ function App() {
               )}
               <div ref={logsEndRef} />
             </div>
+          </div>
 
-            {/* Animation Video Area (approx 1/3 width on md+ screens) */}
-            <div className="w-1/3 hidden md:flex flex-col relative items-center justify-center">
-              <video
-                className={`w-full h-full object-contain transition-all duration-500 ${isScraping ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}`}
-                loop
-                muted
-                playsInline
-                ref={(el) => {
-                  if (el) {
-                    if (isScraping) {
-                      el.play().catch(e => console.log('Autoplay prevented:', e));
-                    } else {
-                      el.pause();
-                    }
-                  }
-                }}
-              >
-                <source src="/mascotte_alpha.webm" type="video/webm" />
-              </video>
+          {/* Map preview panel — separate bento box */}
+          <div ref={mapPanelRef} className={`hidden md:flex flex-col dark:bg-slate-900 bg-slate-50 border dark:border-slate-800 border-slate-200 rounded-xl shadow-xl overflow-hidden ${mapFullscreen ? 'flex-1' : 'w-[38%]'}`}>
+            <div className="flex items-center justify-between px-4 py-2.5 border-b dark:border-slate-800 border-slate-200 shrink-0">
+              <span className="text-xs font-mono dark:text-slate-400 text-slate-600">Mappa</span>
+              <div className="flex items-center gap-2">
+                {previewCenter && (
+                  <span className="text-xs dark:text-slate-500 text-slate-400">
+                    {previewCenter.lat.toFixed(4)}, {previewCenter.lng.toFixed(4)}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setMapFullscreen(f => !f)}
+                  title={mapFullscreen ? 'Riduci mappa' : 'Espandi mappa'}
+                  className="p-1 rounded dark:text-slate-500 text-slate-400 dark:hover:text-slate-200 hover:text-slate-700 transition-colors"
+                >
+                  {mapFullscreen ? (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9L4 4m0 0h5m-5 0v5M15 9l5-5m0 0h-5m5 0v5M9 15l-5 5m0 0h5m-5 0v-5M15 15l5 5m0 0h-5m5 0v-5" />
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5M20 8V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5M20 16v4m0 0h-4m4 0l-5-5" />
+                    </svg>
+                  )}
+                </button>
+              </div>
+            </div>
+            <div className="relative flex-1">
+              {(previewCenter || pastSearches.length > 0) ? (() => {
+                const lastSearch = pastSearches[pastSearches.length - 1];
+                const mapCenter = previewCenter
+                  ? [previewCenter.lat, previewCenter.lng]
+                  : [lastSearch.Lat, lastSearch.Lng];
+                const mapKey = previewCenter
+                  ? `${previewCenter.lat},${previewCenter.lng}`
+                  : `past-${lastSearch.Lat},${lastSearch.Lng}`;
+                return (
+                  <>
+                    <MapContainer
+                      key={mapKey}
+                      center={mapCenter}
+                      zoom={13}
+                      style={{ height: '100%', width: '100%' }}
+                      zoomControl={false}
+                    >
+                      <MapClickHandler pickingMode={pickingMode} onPick={handlePickLocation} />
+                      <MapInvalidator trigger={mapFullscreen} />
+                      <TileLayer
+                        key={theme}
+                        url={theme === 'dark'
+                          ? 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png'
+                          : 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png'}
+                        attribution='© Stadia Maps © OpenStreetMap'
+                      />
+                      {/* Cerchi ricerche precedenti */}
+                      {pastSearches.map((s, i) => {
+                        const color = keywordColor(s.Keywords);
+                        return (
+                          <Circle
+                            key={`past-${i}`}
+                            center={[s.Lat, s.Lng]}
+                            radius={s.Raggio}
+                            pathOptions={{ color, fillColor: color, fillOpacity: 0.08, dashArray: '6 4', weight: 2 }}
+                          >
+                            <Tooltip sticky>
+                              <div style={{ fontSize: 12, lineHeight: 1.5 }}>
+                                <strong>{s.Keywords}</strong><br />
+                                {s.Data} · r={s.Raggio}m
+                              </div>
+                            </Tooltip>
+                          </Circle>
+                        );
+                      })}
+                      {/* Cerchio + griglia anteprima corrente */}
+                      {previewCenter && (
+                        <>
+                          <Circle
+                            center={[previewCenter.lat, previewCenter.lng]}
+                            radius={parseInt(radius) || 0}
+                            pathOptions={{ color: '#3b82f6', fillColor: '#3b82f6', fillOpacity: 0.08 }}
+                          />
+                          {gridPoints.map(([lat, lng], i) => (
+                            <CircleMarker
+                              key={i}
+                              center={[lat, lng]}
+                              radius={3}
+                              pathOptions={{ color: '#f97316', fillColor: '#f97316', fillOpacity: 0.6, weight: 1 }}
+                            />
+                          ))}
+                          <Marker position={[previewCenter.lat, previewCenter.lng]} />
+                        </>
+                      )}
+                    </MapContainer>
+                    {/* Legenda keyword */}
+                    {pastSearches.length > 0 && (() => {
+                      const seen = new Set();
+                      const uniqueEntries = pastSearches.filter(s => {
+                        if (seen.has(s.Keywords)) return false;
+                        seen.add(s.Keywords);
+                        return true;
+                      });
+                      return (
+                        <div className="absolute top-2 left-2 bg-black/70 text-white text-xs rounded z-[1000] pointer-events-none max-h-[60%] overflow-y-auto">
+                          {uniqueEntries.map((s, i) => (
+                            <div key={i} className="flex items-center gap-1.5 px-2 py-1">
+                              <span style={{ width: 10, height: 10, borderRadius: 2, background: keywordColor(s.Keywords), flexShrink: 0, display: 'inline-block', border: `1.5px solid ${keywordColor(s.Keywords)}` }} />
+                              <span className="truncate max-w-[120px]">{s.Keywords}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                    {/* Picking mode hint */}
+                    {pickingMode && (
+                      <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-blue-600/90 text-white text-xs px-3 py-1.5 rounded-full z-[1000] pointer-events-none whitespace-nowrap shadow-lg">
+                        Clicca sulla mappa per posizionare il centro · Esc per annullare
+                      </div>
+                    )}
+                  </>
+                );
+              })() : (
+                <div className="h-full flex flex-col items-center justify-center dark:text-slate-500 text-slate-400 text-sm gap-1">
+                  <span className="text-3xl">🗺</span>
+                  <span>Clicca "Anteprima Area"</span>
+                  <span>per visualizzare la zona</span>
+                </div>
+              )}
+            </div>
+            {/* Map footer */}
+            <div className="shrink-0 border-t dark:border-slate-800 border-slate-200 px-3 py-1.5 flex justify-between items-center">
+              <span className="text-xs dark:text-slate-500 text-slate-400">
+                {pastSearches.length} zona{pastSearches.length !== 1 ? 'e' : ''} cercata{pastSearches.length !== 1 ? 'e' : ''}
+              </span>
+              {previewCenter && (
+                <span className="text-xs dark:text-slate-500 text-slate-400">
+                  {gridPoints.length} punti · ~{gridPoints.length * 3} chiamate API
+                </span>
+              )}
             </div>
           </div>
+
         </div>
 
         {/* Progress Bar Container */}
-        {(isScraping || progress.value > 0) && (
+        {!mapFullscreen && (isScraping || progress.value > 0) && (
           <div className="dark:bg-slate-900 bg-slate-50 border dark:border-slate-800 border-slate-200 rounded-xl p-5 shadow-xl w-full">
             <div className="flex justify-between items-center mb-2">
               <span className="text-sm font-medium dark:text-slate-300 text-slate-700">
@@ -589,7 +897,7 @@ function App() {
         )}
 
         {/* Results Preview & Action Area */}
-        <div className={`transition-all duration-300 ease-in-out flex flex-col ${isFullscreen
+        <div className={`transition-all duration-300 ease-in-out flex-col ${mapFullscreen ? 'hidden' : 'flex'} ${isFullscreen
           ? "fixed inset-0 z-50 dark:bg-slate-900 bg-slate-50 p-6 overflow-hidden w-full h-full"
           : "dark:bg-slate-900 bg-slate-50 border dark:border-slate-800 border-slate-200 rounded-xl p-6 shadow-xl flex-1 relative min-h-0"
           }`}>
@@ -961,7 +1269,20 @@ function App() {
                         {r['Data Estrazione'] || '-'}
                       </td>
                       <td className="px-6 py-4 text-xs text-center">
-                        <span className={`py-1 px-2 rounded ${r.Call ? 'dark:bg-slate-800/50 bg-slate-200/50 text-slate-500' : 'dark:bg-slate-800 bg-slate-100 dark:text-slate-300 text-slate-700'}`}>{r['Keyword Ricerca']}</span>
+                        {r['Keyword Ricerca'] ? (() => {
+                          const kColor = keywordColor(r['Keyword Ricerca']);
+                          return (
+                            <span
+                              style={r.Call
+                                ? { background: `${kColor}18`, border: `1px solid ${kColor}40`, color: `${kColor}80` }
+                                : { background: `${kColor}22`, border: `1px solid ${kColor}60`, color: kColor }
+                              }
+                              className="py-1 px-2 rounded font-medium"
+                            >
+                              {r['Keyword Ricerca']}
+                            </span>
+                          );
+                        })() : <span className="text-slate-500">-</span>}
                       </td>
                       <td className="px-3 py-2">
                         <textarea

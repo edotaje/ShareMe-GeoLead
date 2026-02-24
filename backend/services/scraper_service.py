@@ -1,10 +1,12 @@
 import math
+import re
 import time
 import googlemaps
 import pandas as pd
 import os
 from datetime import datetime
 from typing import List, Dict, Any, Generator
+from openpyxl import load_workbook
 
 LISTS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "lists")
 
@@ -33,6 +35,16 @@ class GoogleMapsScraperService:
                     
         return points
 
+    def _parse_coordinates(self, text: str):
+        """Rileva se il testo è una coppia lat,lng. Restituisce (lat, lng) o None."""
+        pattern = r'^(-?\d{1,3}(?:\.\d+)?)[,\s]+(-?\d{1,3}(?:\.\d+)?)$'
+        match = re.match(pattern, text.strip())
+        if match:
+            lat, lng = float(match.group(1)), float(match.group(2))
+            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                return (lat, lng)
+        return None
+
     def run_scraping(self, city: str, radius: int, keywords: List[str], list_name: str, grid_step_m: int = 500) -> Generator[Dict[str, Any], None, None]:
         """
         Runs the scraping process, deduplicates against the selected Excel list, and saves results.
@@ -60,15 +72,19 @@ class GoogleMapsScraperService:
                 yield {"type": "error", "message": f"Errore lettura lista: {str(e)}"}
                 return
 
-            yield {"type": "log", "message": f"Inizializzazione ricerca per la città: {city}"}
-            geocode_result = self.gmaps.geocode(city)
-            if not geocode_result:
-                yield {"type": "error", "message": f"Impossibile trovare le coordinate per '{city}'"}
-                return
-            
-            location = geocode_result[0]['geometry']['location']
-            center_lat, center_lng = location['lat'], location['lng']
-            yield {"type": "log", "message": f"Coordinate centrali trovate: {center_lat}, {center_lng}"}
+            coords = self._parse_coordinates(city)
+            if coords:
+                center_lat, center_lng = coords
+                yield {"type": "log", "message": f"Coordinate dirette: {center_lat}, {center_lng}"}
+            else:
+                yield {"type": "log", "message": f"Geocodifica in corso per: '{city}'"}
+                geocode_result = self.gmaps.geocode(city)
+                if not geocode_result:
+                    yield {"type": "error", "message": f"Impossibile trovare le coordinate per '{city}'"}
+                    return
+                location = geocode_result[0]['geometry']['location']
+                center_lat, center_lng = location['lat'], location['lng']
+                yield {"type": "log", "message": f"Coordinate trovate: {center_lat}, {center_lng}"}
 
             search_radius_m = int(grid_step_m * 1.5)
             
@@ -184,20 +200,46 @@ class GoogleMapsScraperService:
                 yield {"type": "progress", "subtype": "details", "value": progress_pct, "label": f"Recupero dett. ({i+1}/{total_places})"}
                     
             yield {"type": "log", "message": f"Estrazione dettagli completata. Salvataggio in '{filename}'..."}
-            
+
             try:
+                # Backup existing _ricerche sheet before pandas overwrites the file
+                searches_rows = []
+                searches_headers = ['Data', 'Lat', 'Lng', 'Raggio', 'Grid Step', 'Keywords']
+                try:
+                    searches_df = pd.read_excel(filepath, sheet_name='_ricerche')
+                    searches_headers = searches_df.columns.tolist()
+                    searches_rows = searches_df.values.tolist()
+                except Exception:
+                    pass  # Sheet doesn't exist yet — will be created fresh
+
                 # Append new data to the existing dataframe
                 new_df = pd.DataFrame(final_results)
                 updated_df = pd.concat([existing_df, new_df], ignore_index=True)
-                
-                # Save to excel
+
+                # Save main data (overwrites the whole file — _ricerche is restored below)
                 updated_df.to_excel(filepath, index=False, engine='openpyxl')
-                
+
+                # Reopen with openpyxl to write _ricerche sheet (preserves main sheet)
+                wb = load_workbook(filepath)
+                ws = wb.create_sheet('_ricerche')
+                ws.append(searches_headers)
+                for row in searches_rows:
+                    ws.append(row)
+                ws.append([
+                    datetime.now().strftime("%d/%m/%Y %H:%M"),
+                    center_lat,
+                    center_lng,
+                    radius,
+                    grid_step_m,
+                    ', '.join(keywords)
+                ])
+                wb.save(filepath)
+
                 yield {"type": "log", "message": f"SUCCESSO: Aggiunti {len(final_results)} nuovi lead alla lista."}
-                
+
                 # Return the updated full list to the frontend
                 yield {"type": "done", "data": updated_df.fillna('').to_dict(orient='records')}
-                
+
             except Exception as e:
                 yield {"type": "error", "message": f"ERRORE salvataggio file Excel: {str(e)}"}
 

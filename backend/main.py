@@ -76,6 +76,19 @@ async def download_excel(data: list):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate Excel: {str(e)}")
 
+@app.get("/api/geocode")
+async def geocode_location(q: str):
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=500, detail="API key mancante")
+    import googlemaps
+    gmaps = googlemaps.Client(key=api_key)
+    result = gmaps.geocode(q)
+    if not result:
+        raise HTTPException(status_code=404, detail="Località non trovata")
+    loc = result[0]['geometry']['location']
+    return {"lat": loc['lat'], "lng": loc['lng']}
+
 @app.get("/health")
 def read_health():
     return {"status": "ok"}
