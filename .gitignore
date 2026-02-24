@@ -1,0 +1,52 @@
+# OS / sistema
+.DS_Store
+Thumbs.db
+
+# File sensibili
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Backend runtime/log
+backend/uvicorn.log
+*.log
+logs/
+
+# Dati locali (non versionare dataset/output)
+backend/data/lists/*.xlsx
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+dist/
+frontend/dist/
+dist-ssr/
+.vite/
+*.local
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Build cache
+.cache/

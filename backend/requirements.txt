@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+pydantic
+googlemaps
+pandas
+openpyxl
+python-dotenv
+sse-starlette
+python-multipart
