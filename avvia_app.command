@@ -15,6 +15,16 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$DIR"
 
 echo "Directory progetto: $DIR"
+
+# --- Aggiornamento automatico da GitHub ---
+if [ -d "$DIR/.git" ]; then
+    echo "Controllo aggiornamenti..."
+    if git -C "$DIR" pull --ff-only 2>/dev/null; then
+        echo -e "${GREEN}App aggiornata all'ultima versione.${NC}"
+    else
+        echo -e "${BLUE}Nessun aggiornamento disponibile (o repository non raggiungibile).${NC}"
+    fi
+fi
 ARCH="$(uname -m)"
 echo "Architettura Mac rilevata: $ARCH"
 

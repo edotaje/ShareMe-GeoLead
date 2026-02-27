@@ -1,6 +1,8 @@
 import math
 import re
 import time
+import shutil
+import tempfile
 import googlemaps
 import pandas as pd
 import os
@@ -144,7 +146,10 @@ class GoogleMapsScraperService:
                                         places_data.append({
                                             'place_id': place_id,
                                             'keyword_source': keyword,
-                                            'name': place.get('name', '')
+                                            'name': place.get('name', ''),
+                                            'vicinity': place.get('vicinity', ''),
+                                            'rating': place.get('rating', ''),
+                                            'types': place.get('types', []),
                                         })
                                 
                         next_page_token = places_result.get('next_page_token')
@@ -162,78 +167,84 @@ class GoogleMapsScraperService:
                 yield {"type": "done", "data": existing_df.fillna('').to_dict(orient='records')}
                 return
             
-            yield {"type": "log", "message": "Recupero dei dettagli completi per le singole attività (questo richiederà tempo)..."}
-            
-            total_places = len(places_data)
-            yield {"type": "progress", "subtype": "details", "value": 0, "label": "Estrazione dettagli avviata..."}
-            
+            extraction_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
             final_results = []
-            for i, p_data in enumerate(places_data):
-                if i % 10 == 0:
-                    yield {"type": "log", "message": f"Progresso dettagli: [{i}/{total_places}]"}
-                
-                try:
-                    details_result = self.gmaps.place(
-                        place_id=p_data['place_id'],
-                        fields=['name', 'formatted_address']
-                    )
-                    details = details_result.get('result', {})
-                    
-                    extraction_time = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
-                    final_results.append({
-                        'Place_ID': p_data['place_id'],
-                        'Nome': details.get('name', p_data['name']),
-                        'Indirizzo': details.get('formatted_address', ''),
-                        'Telefono': details.get('formatted_phone_number', ''),
-                        'Sito Web': details.get('website', ''),
-                        'Rating': details.get('rating', ''),
-                        'Categorie': ", ".join(details.get('types', [])),
-                        'Keyword Ricerca': p_data['keyword_source'],
-                        'Data Estrazione': extraction_time,
-                        'Hide': False,
-                        'Call': False
-                    })
-                except Exception as e:
-                    yield {"type": "log", "message": f"[!] Errore estrazione dettagli per '{p_data['name']}': {str(e)}"}
-                    
-                progress_pct = int(((i + 1) / total_places) * 100)
-                yield {"type": "progress", "subtype": "details", "value": progress_pct, "label": f"Recupero dett. ({i+1}/{total_places})"}
+            for p_data in places_data:
+                final_results.append({
+                    'Place_ID': p_data['place_id'],
+                    'Nome': p_data['name'],
+                    'Indirizzo': p_data['vicinity'],
+                    'Telefono': '',
+                    'Sito Web': '',
+                    'Rating': p_data['rating'],
+                    'Categorie': ", ".join(p_data['types']),
+                    'Keyword Ricerca': p_data['keyword_source'],
+                    'Data Estrazione': extraction_time,
+                    'Hide': False,
+                    'Call': False
+                })
                     
             yield {"type": "log", "message": f"Estrazione dettagli completata. Salvataggio in '{filename}'..."}
 
             try:
-                # Backup existing _ricerche sheet before pandas overwrites the file
-                searches_rows = []
-                searches_headers = ['Data', 'Lat', 'Lng', 'Raggio', 'Grid Step', 'Keywords']
-                try:
-                    searches_df = pd.read_excel(filepath, sheet_name='_ricerche')
-                    searches_headers = searches_df.columns.tolist()
-                    searches_rows = searches_df.values.tolist()
-                except Exception:
-                    pass  # Sheet doesn't exist yet — will be created fresh
+                # Import the shared file lock
+                from routers.lists import _get_file_lock
 
-                # Append new data to the existing dataframe
-                new_df = pd.DataFrame(final_results)
-                updated_df = pd.concat([existing_df, new_df], ignore_index=True)
+                with _get_file_lock(filepath):
+                    # Re-read existing data under lock to avoid lost updates
+                    try:
+                        existing_df = pd.read_excel(filepath)
+                        if 'Place_ID' not in existing_df.columns:
+                            existing_df['Place_ID'] = ''
+                    except Exception as e:
+                        yield {"type": "error", "message": f"Errore ri-lettura lista: {str(e)}"}
+                        return
 
-                # Save main data (overwrites the whole file — _ricerche is restored below)
-                updated_df.to_excel(filepath, index=False, engine='openpyxl')
+                    # Backup existing _ricerche sheet
+                    searches_rows = []
+                    searches_headers = ['Data', 'Lat', 'Lng', 'Raggio', 'Grid Step', 'Keywords']
+                    try:
+                        searches_df = pd.read_excel(filepath, sheet_name='_ricerche')
+                        searches_headers = searches_df.columns.tolist()
+                        searches_rows = searches_df.values.tolist()
+                    except Exception:
+                        pass  # Sheet doesn't exist yet
 
-                # Reopen with openpyxl to write _ricerche sheet (preserves main sheet)
-                wb = load_workbook(filepath)
-                ws = wb.create_sheet('_ricerche')
-                ws.append(searches_headers)
-                for row in searches_rows:
-                    ws.append(row)
-                ws.append([
-                    datetime.now().strftime("%d/%m/%Y %H:%M"),
-                    center_lat,
-                    center_lng,
-                    radius,
-                    grid_step_m,
-                    ', '.join(keywords)
-                ])
-                wb.save(filepath)
+                    # Append new data to the existing dataframe
+                    new_df = pd.DataFrame(final_results)
+                    updated_df = pd.concat([existing_df, new_df], ignore_index=True)
+
+                    # Atomic write: write to temp file, then replace original
+                    dir_name = os.path.dirname(filepath)
+                    fd, tmp_path = tempfile.mkstemp(suffix='.xlsx', dir=dir_name)
+                    os.close(fd)
+
+                    try:
+                        # Write main data to temp file
+                        updated_df.to_excel(tmp_path, index=False, engine='openpyxl')
+
+                        # Add _ricerche sheet to temp file
+                        wb = load_workbook(tmp_path)
+                        ws = wb.create_sheet('_ricerche')
+                        ws.append(searches_headers)
+                        for row in searches_rows:
+                            ws.append(row)
+                        ws.append([
+                            datetime.now().strftime("%d/%m/%Y %H:%M"),
+                            center_lat,
+                            center_lng,
+                            radius,
+                            grid_step_m,
+                            ', '.join(keywords)
+                        ])
+                        wb.save(tmp_path)
+
+                        # Atomic replace
+                        shutil.move(tmp_path, filepath)
+                    except Exception:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                        raise
 
                 yield {"type": "log", "message": f"SUCCESSO: Aggiunti {len(final_results)} nuovi lead alla lista."}
 

@@ -32,6 +32,7 @@ logs/
 
 # Dati locali (non versionare dataset/output)
 backend/data/lists/*.xlsx
+!backend/data/lists/.gitkeep
 
 # Node / Frontend
 node_modules/

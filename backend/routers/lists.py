@@ -1,5 +1,9 @@
 import os
 import glob
+import shutil
+import tempfile
+import threading
+from collections import defaultdict
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -12,6 +16,13 @@ LISTS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "lists")
 
 # Ensure the directory exists
 os.makedirs(LISTS_DIR, exist_ok=True)
+
+# Per-file locks to prevent concurrent read-modify-write corruption
+_file_locks = defaultdict(threading.Lock)
+
+def _get_file_lock(filepath: str) -> threading.Lock:
+    """Returns a lock specific to the given file path."""
+    return _file_locks[os.path.normpath(filepath)]
 
 class CreateListRequest(BaseModel):
     name: str
@@ -98,7 +109,11 @@ def delete_list(filename: str):
         raise HTTPException(status_code=500, detail=f"Errore durante l'eliminazione del file: {str(e)}")
 
 def _save_preserving_ricerche(filepath: str, df: pd.DataFrame):
-    """Saves df to the main sheet of the Excel file, preserving the _ricerche sheet."""
+    """Saves df to the main sheet of the Excel file, preserving the _ricerche sheet.
+
+    Uses atomic write: writes to a temp file first, then replaces the original.
+    The caller MUST hold the file lock for filepath.
+    """
     # Backup _ricerche sheet if it exists
     searches_headers = []
     searches_rows = []
@@ -109,17 +124,31 @@ def _save_preserving_ricerche(filepath: str, df: pd.DataFrame):
     except Exception:
         pass  # Sheet doesn't exist yet
 
-    # Overwrite the file with the updated main sheet
-    df.to_excel(filepath, index=False, engine='openpyxl')
+    # Write to a temporary file first (atomic write pattern)
+    dir_name = os.path.dirname(filepath)
+    fd, tmp_path = tempfile.mkstemp(suffix='.xlsx', dir=dir_name)
+    os.close(fd)
 
-    # Restore _ricerche sheet if it existed
-    if searches_headers:
-        wb = load_workbook(filepath)
-        ws = wb.create_sheet('_ricerche')
-        ws.append(searches_headers)
-        for row in searches_rows:
-            ws.append(row)
-        wb.save(filepath)
+    try:
+        # Write main sheet
+        df.to_excel(tmp_path, index=False, engine='openpyxl')
+
+        # Add _ricerche sheet if it existed
+        if searches_headers:
+            wb = load_workbook(tmp_path)
+            ws = wb.create_sheet('_ricerche')
+            ws.append(searches_headers)
+            for row in searches_rows:
+                ws.append(row)
+            wb.save(tmp_path)
+
+        # Atomic replace: rename temp file over original
+        shutil.move(tmp_path, filepath)
+    except Exception:
+        # Clean up temp file on failure - original file remains intact
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 
 class UpdateNoteRequest(BaseModel):
@@ -135,22 +164,25 @@ def update_note(filename: str, request: UpdateNoteRequest):
         raise HTTPException(status_code=404, detail="Lista non trovata")
 
     try:
-        df = pd.read_excel(filepath)
+        with _get_file_lock(filepath):
+            df = pd.read_excel(filepath)
 
-        if 'Place_ID' not in df.columns:
-            raise HTTPException(status_code=500, detail="Il file non contiene una colonna Place_ID.")
+            if 'Place_ID' not in df.columns:
+                raise HTTPException(status_code=500, detail="Il file non contiene una colonna Place_ID.")
 
-        if 'Note' not in df.columns:
-            df['Note'] = ''
+            if 'Note' not in df.columns:
+                df['Note'] = ''
 
-        mask = df['Place_ID'].astype(str) == request.place_id
-        if not mask.any():
-            raise HTTPException(status_code=404, detail=f"Riga con Place_ID={request.place_id} non trovata.")
+            mask = df['Place_ID'].astype(str) == request.place_id
+            if not mask.any():
+                raise HTTPException(status_code=404, detail=f"Riga con Place_ID={request.place_id} non trovata.")
 
-        df.loc[mask, 'Note'] = request.note
-        _save_preserving_ricerche(filepath, df)
+            df.loc[mask, 'Note'] = request.note
+            _save_preserving_ricerche(filepath, df)
 
         return {"message": "Nota aggiornata con successo"}
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -174,36 +206,39 @@ def update_row(filename: str, request: UpdateRowRequest):
         raise HTTPException(status_code=400, detail="Azione non valida. Usa 'hide', 'call' o 'interested'.")
         
     try:
-        df = pd.read_excel(filepath)
-        
-        if 'Place_ID' not in df.columns:
-            raise HTTPException(status_code=500, detail="Il file non contiene una colonna Place_ID.")
-            
-        # Ensure columns exist
-        if 'Hide' not in df.columns:
-            df['Hide'] = False
-        if 'Call' not in df.columns:
-            df['Call'] = False
-        if 'Interested' not in df.columns:
-            df['Interested'] = False
-            
-        if request.action == "hide":
-            col_name = "Hide"
-        elif request.action == "call":
-            col_name = "Call"
-        else:
-            col_name = "Interested"
-        
-        # Find the row and update
-        mask = df['Place_ID'].astype(str) == request.place_id
-        if not mask.any():
-            raise HTTPException(status_code=404, detail=f"Riga con Place_ID={request.place_id} non trovata.")
-            
-        df.loc[mask, col_name] = request.value
+        with _get_file_lock(filepath):
+            df = pd.read_excel(filepath)
 
-        _save_preserving_ricerche(filepath, df)
+            if 'Place_ID' not in df.columns:
+                raise HTTPException(status_code=500, detail="Il file non contiene una colonna Place_ID.")
+
+            # Ensure columns exist
+            if 'Hide' not in df.columns:
+                df['Hide'] = False
+            if 'Call' not in df.columns:
+                df['Call'] = False
+            if 'Interested' not in df.columns:
+                df['Interested'] = False
+
+            if request.action == "hide":
+                col_name = "Hide"
+            elif request.action == "call":
+                col_name = "Call"
+            else:
+                col_name = "Interested"
+
+            # Find the row and update
+            mask = df['Place_ID'].astype(str) == request.place_id
+            if not mask.any():
+                raise HTTPException(status_code=404, detail=f"Riga con Place_ID={request.place_id} non trovata.")
+
+            df.loc[mask, col_name] = request.value
+
+            _save_preserving_ricerche(filepath, df)
 
         return {"message": f"Riga aggiornata con successo! {col_name}={request.value}"}
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         traceback.print_exc()
