@@ -18,33 +18,38 @@ echo "Directory progetto: $DIR"
 
 # --- Repository GitHub ---
 REPO_URL="https://github.com/edotaje/ShareMe-GeoLead.git"
-APP_DIR="$DIR/ShareMe-GeoLead"
 
-# Se il codice non è ancora stato scaricato, fai git clone
-if [ ! -d "$APP_DIR/.git" ]; then
+# Controlla se Git è installato
+if ! command -v git &> /dev/null; then
+    echo "Git non trovato. Installazione in corso..."
+    xcode-select --install 2>/dev/null
+    echo -e "${RED}Installa gli Xcode Command Line Tools dalla finestra che si è aperta, poi rilancia questo script.${NC}"
+    read -p "Premi Invio per chiudere..."
+    exit 1
+fi
+
+# Se il codice non è ancora stato scaricato (nessun .git nella cartella dello script)
+if [ ! -d "$DIR/.git" ]; then
     echo -e "${BLUE}Prima installazione: scarico l'app da GitHub...${NC}"
 
-    # Controlla se Git è installato
-    if ! command -v git &> /dev/null; then
-        echo "Git non trovato. Installazione in corso..."
-        xcode-select --install 2>/dev/null
-        echo -e "${RED}Installa gli Xcode Command Line Tools dalla finestra che si è aperta, poi rilancia questo script.${NC}"
-        read -p "Premi Invio per chiudere..."
-        exit 1
-    fi
-
-    git clone "$REPO_URL" "$APP_DIR"
+    # Clona in una cartella temporanea e sposta il contenuto qui
+    TEMP_CLONE="$DIR/_temp_clone"
+    rm -rf "$TEMP_CLONE"
+    git clone "$REPO_URL" "$TEMP_CLONE"
     if [ $? -ne 0 ]; then
         echo -e "${RED}Errore nel download del codice da GitHub!${NC}"
+        rm -rf "$TEMP_CLONE"
         read -p "Premi Invio per chiudere..."
         exit 1
     fi
 
-    # Copia il .env dentro il progetto scaricato
-    if [ -f "$DIR/.env" ]; then
-        cp "$DIR/.env" "$APP_DIR/.env"
-        echo -e "${GREEN}File .env copiato nel progetto.${NC}"
-    else
+    # Sposta i file clonati nella cartella corrente (preservando .env e avvia_app.command)
+    cp -a "$TEMP_CLONE/.git" "$DIR/.git"
+    git -C "$DIR" checkout -- .
+    rm -rf "$TEMP_CLONE"
+
+    # Controlla che il .env esista
+    if [ ! -f "$DIR/.env" ]; then
         echo -e "${RED}ATTENZIONE: file .env non trovato accanto a questo script!${NC}"
         echo "L'app non funzionerà senza la chiave API di Google Maps."
         read -p "Premi Invio per chiudere..."
@@ -52,28 +57,18 @@ if [ ! -d "$APP_DIR/.git" ]; then
     fi
 
     # Crea la cartella dati se non esiste
-    mkdir -p "$APP_DIR/backend/data/lists"
+    mkdir -p "$DIR/backend/data/lists"
 
     echo -e "${GREEN}Download completato!${NC}"
 else
-    # Il codice esiste già, aggiorna
+    # Il codice esiste già, aggiorna con pull
     echo "Controllo aggiornamenti..."
-    if git -C "$APP_DIR" pull --ff-only 2>/dev/null; then
+    if git -C "$DIR" pull --ff-only 2>/dev/null; then
         echo -e "${GREEN}App aggiornata all'ultima versione.${NC}"
     else
         echo -e "${BLUE}Nessun aggiornamento disponibile (o repository non raggiungibile).${NC}"
     fi
-
-    # Aggiorna .env se presente accanto allo script
-    if [ -f "$DIR/.env" ] && [ "$DIR/.env" -nt "$APP_DIR/.env" ]; then
-        cp "$DIR/.env" "$APP_DIR/.env"
-        echo -e "${GREEN}File .env aggiornato.${NC}"
-    fi
 fi
-
-# Da qui in poi lavoriamo dentro la cartella del progetto
-DIR="$APP_DIR"
-cd "$DIR"
 
 ARCH="$(uname -m)"
 echo "Architettura Mac rilevata: $ARCH"

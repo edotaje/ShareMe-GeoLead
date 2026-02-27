@@ -545,7 +545,7 @@ function App() {
             <div className="flex items-center gap-3">
               <img src="/icon.webp" alt="Share Me Icon" className="w-8 h-8 object-contain" />
               <h1 className="text-2xl font-bold dark:text-white text-slate-900 tracking-tight">
-                Share Me - GeoLead
+                GeoLead
               </h1>
             </div>
             <button
