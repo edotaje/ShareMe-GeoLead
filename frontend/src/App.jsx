@@ -543,7 +543,7 @@ function App() {
         <div className="dark:bg-slate-900 bg-slate-50 border dark:border-slate-800 border-slate-200 rounded-xl p-6 shadow-sm flex-1 flex flex-col overflow-y-auto custom-scrollbar">
           <div className="flex justify-between items-center mb-6 shrink-0">
             <h1 className="text-2xl font-bold dark:text-white text-slate-900 tracking-tight">
-              Share Me GeoLead
+              Share Me - GeoLead
             </h1>
             <button
               type="button"
