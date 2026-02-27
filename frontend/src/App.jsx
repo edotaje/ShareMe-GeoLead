@@ -542,9 +542,12 @@ function App() {
       <div className="col-span-1 md:col-span-4 lg:col-span-3 h-full overflow-hidden flex flex-col">
         <div className="dark:bg-slate-900 bg-slate-50 border dark:border-slate-800 border-slate-200 rounded-xl p-6 shadow-sm flex-1 flex flex-col overflow-y-auto custom-scrollbar">
           <div className="flex justify-between items-center mb-6 shrink-0">
-            <h1 className="text-2xl font-bold dark:text-white text-slate-900 tracking-tight">
-              Share Me - GeoLead
-            </h1>
+            <div className="flex items-center gap-3">
+              <img src="/icon.webp" alt="Share Me Icon" className="w-8 h-8 object-contain" />
+              <h1 className="text-2xl font-bold dark:text-white text-slate-900 tracking-tight">
+                Share Me - GeoLead
+              </h1>
+            </div>
             <button
               type="button"
               onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
