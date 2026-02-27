@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { MapContainer, TileLayer, Circle, CircleMarker, Marker, Tooltip, useMapEvents, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -55,11 +55,15 @@ function keywordColor(keyword) {
   return KEYWORD_COLORS[Math.abs(hash) % KEYWORD_COLORS.length];
 }
 
+const MAX_GRID_POINTS = 2000;
+
 function generateGridPoints(centerLat, centerLng, radiusM, gridStepM) {
   const points = [];
-  if (!radiusM || !gridStepM) return points;
-  const latStepDeg = gridStepM / 111320.0;
+  if (!radiusM || !gridStepM || gridStepM < 1) return points;
+  // Stima preventiva: se i punti sarebbero troppi, non calcolare
   const numSteps = Math.ceil(radiusM / gridStepM);
+  if (numSteps > 70) return points; // (2*70+1)^2 ≈ 20000, troppi
+  const latStepDeg = gridStepM / 111320.0;
   for (let i = -numSteps; i <= numSteps; i++) {
     for (let j = -numSteps; j <= numSteps; j++) {
       const xOff = i * gridStepM;
@@ -69,6 +73,7 @@ function generateGridPoints(centerLat, centerLng, radiusM, gridStepM) {
         const lngStep = gridStepM / (111320.0 * Math.cos(lat * Math.PI / 180));
         const lng = centerLng + (j * lngStep);
         points.push([lat, lng]);
+        if (points.length >= MAX_GRID_POINTS) return points;
       }
     }
   }
@@ -112,10 +117,24 @@ function App() {
   const kwContainerRef = useRef(null);
   const [showKwSuggestions, setShowKwSuggestions] = useState(false);
 
+  // Debounce radius e gridStep per evitare ricalcoli ad ogni keystroke
+  const [debouncedRadius, setDebouncedRadius] = useState(radius);
+  const [debouncedGridStep, setDebouncedGridStep] = useState(gridStep);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedRadius(radius), 400);
+    return () => clearTimeout(t);
+  }, [radius]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedGridStep(gridStep), 400);
+    return () => clearTimeout(t);
+  }, [gridStep]);
+
   const gridPoints = useMemo(() => {
     if (!previewCenter) return [];
-    return generateGridPoints(previewCenter.lat, previewCenter.lng, parseInt(radius) || 0, parseInt(gridStep) || 500);
-  }, [previewCenter, radius, gridStep]);
+    return generateGridPoints(previewCenter.lat, previewCenter.lng, parseInt(debouncedRadius) || 0, parseInt(debouncedGridStep) || 500);
+  }, [previewCenter, debouncedRadius, debouncedGridStep]);
 
   const handlePreview = async () => {
     if (!city) return;
@@ -931,8 +950,10 @@ function App() {
                 {pastSearches.length} zona{pastSearches.length !== 1 ? 'e' : ''} cercata{pastSearches.length !== 1 ? 'e' : ''}
               </span>
               {previewCenter && (
-                <span className="text-xs dark:text-slate-500 text-slate-400">
-                  {gridPoints.length} punti · ~{gridPoints.length * 3} chiamate API
+                <span className={`text-xs ${gridPoints.length >= MAX_GRID_POINTS || (parseInt(debouncedRadius) > 0 && parseInt(debouncedGridStep) > 0 && Math.ceil(parseInt(debouncedRadius) / parseInt(debouncedGridStep)) > 70) ? 'text-amber-500' : 'dark:text-slate-500 text-slate-400'}`}>
+                  {parseInt(debouncedRadius) > 0 && parseInt(debouncedGridStep) > 0 && Math.ceil(parseInt(debouncedRadius) / parseInt(debouncedGridStep)) > 70
+                    ? '⚠ Troppi punti – aumenta il passo griglia o riduci il raggio'
+                    : `${gridPoints.length} punti · ~${gridPoints.length * 3} chiamate API`}
                 </span>
               )}
             </div>
