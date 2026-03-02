@@ -864,11 +864,8 @@ function App() {
                       <MapClickHandler pickingMode={pickingMode} onPick={handlePickLocation} />
                       <MapInvalidator trigger={mapFullscreen} />
                       <TileLayer
-                        key={theme}
-                        url={theme === 'dark'
-                          ? 'https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png'
-                          : 'https://tiles.stadiamaps.com/tiles/alidade_smooth/{z}/{x}/{y}{r}.png'}
-                        attribution='© Stadia Maps © OpenStreetMap'
+                        url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+                        attribution='© OpenStreetMap contributors'
                       />
                       {/* Cerchi ricerche precedenti */}
                       {pastSearches.map((s, i) => {
