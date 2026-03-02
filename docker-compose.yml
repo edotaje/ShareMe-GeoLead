@@ -2,8 +2,8 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
-    env_file:
-      - .env
+    environment:
+      - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
     volumes:
       - /mnt/storage/geolead/lists:/app/data/lists
     expose:
