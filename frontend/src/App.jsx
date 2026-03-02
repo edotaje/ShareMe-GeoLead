@@ -864,8 +864,11 @@ function App() {
                       <MapClickHandler pickingMode={pickingMode} onPick={handlePickLocation} />
                       <MapInvalidator trigger={mapFullscreen} />
                       <TileLayer
-                        url='https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
-                        attribution='© OpenStreetMap contributors'
+                        key={theme}
+                        url={theme === 'dark'
+                          ? 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'
+                          : 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'}
+                        attribution='© OpenStreetMap contributors © CARTO'
                       />
                       {/* Cerchi ricerche precedenti */}
                       {pastSearches.map((s, i) => {
