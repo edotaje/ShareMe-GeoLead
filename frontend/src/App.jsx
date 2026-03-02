@@ -145,7 +145,7 @@ function App() {
     }
     setPreviewLoading(true);
     try {
-      const res = await fetch(`http://localhost:8000/api/geocode?q=${encodeURIComponent(city)}`);
+      const res = await fetch(`/api/geocode?q=${encodeURIComponent(city)}`);
       if (!res.ok) throw new Error('Località non trovata');
       const data = await res.json();
       setPreviewCenter({ lat: data.lat, lng: data.lng });
@@ -173,7 +173,7 @@ function App() {
 
   const fetchLists = async () => {
     try {
-      const resp = await fetch('http://localhost:8000/api/lists');
+      const resp = await fetch('/api/lists');
       const data = await resp.json();
       setLists(data);
       if (data.length > 0 && !selectedList) {
@@ -187,7 +187,7 @@ function App() {
   const fetchListData = async (filename) => {
     if (!filename) return;
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${filename}`);
+      const resp = await fetch(`/api/lists/${filename}`);
       if (resp.ok) {
         const data = await resp.json();
         setResults(data.data || []);
@@ -200,7 +200,7 @@ function App() {
   const fetchSearchHistory = async (filename) => {
     if (!filename) { setPastSearches([]); return; }
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${filename}/searches`);
+      const resp = await fetch(`/api/lists/${filename}/searches`);
       if (resp.ok) {
         const data = await resp.json();
         setPastSearches(data);
@@ -272,7 +272,7 @@ function App() {
     if (!newListName) return;
 
     try {
-      const resp = await fetch('http://localhost:8000/api/lists', {
+      const resp = await fetch('/api/lists', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: newListName })
@@ -301,7 +301,7 @@ function App() {
     if (!confirm2) return;
 
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${selectedList}`, {
+      const resp = await fetch(`/api/lists/${selectedList}`, {
         method: 'DELETE',
       });
 
@@ -334,7 +334,7 @@ function App() {
     );
 
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${selectedList}/row`, {
+      const resp = await fetch(`/api/lists/${selectedList}/row`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -380,7 +380,7 @@ function App() {
   const saveNote = async (placeId, note) => {
     if (!selectedList || !placeId) return;
     try {
-      await fetch(`http://localhost:8000/api/lists/${selectedList}/note`, {
+      await fetch(`/api/lists/${selectedList}/note`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ place_id: placeId, note })
@@ -403,7 +403,7 @@ function App() {
     // Do not clear setResults([]) here so the user keeps seeing the current list while extracting
 
     try {
-      const response = await fetch('http://localhost:8000/api/scrape', {
+      const response = await fetch('/api/scrape', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -481,7 +481,7 @@ function App() {
     setLogs((prev) => [...prev, 'Richiesta download Excel in corso...']);
 
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${encodeURIComponent(selectedList)}/download`);
+      const resp = await fetch(`/api/lists/${encodeURIComponent(selectedList)}/download`);
 
       if (!resp.ok) {
         throw new Error('Errore durante il download dal server.');
