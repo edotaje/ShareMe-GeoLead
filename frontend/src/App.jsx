@@ -390,6 +390,17 @@ function App() {
     }
   };
 
+  const scrapeControllerRef = useRef(null);
+
+  // F1: Cleanup - cancella lo stream SSE se il componente si smonta
+  useEffect(() => {
+    return () => {
+      if (scrapeControllerRef.current) {
+        scrapeControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   const handleScrape = async (e) => {
     e.preventDefault();
     if (!city || !radius || !keywords || !selectedList) {
@@ -397,10 +408,19 @@ function App() {
       return;
     }
 
+    // F1: Cancella eventuale scrape precedente ancora in corso
+    if (scrapeControllerRef.current) {
+      scrapeControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    scrapeControllerRef.current = controller;
+
     setIsScraping(true);
     setProgress({ value: 0, label: 'Inizializzazione request...', subtype: '' });
     setLogs([`Inizio richiesta al server per ${city}...`]);
     // Do not clear setResults([]) here so the user keeps seeing the current list while extracting
+
+    let receivedDone = false;
 
     try {
       const response = await fetch('/api/scrape', {
@@ -415,6 +435,7 @@ function App() {
           keywords: keywords.split(',').map((k) => k.trim()).filter(k => k),
           list_name: selectedList
         }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -426,52 +447,73 @@ function App() {
       const decoder = new TextDecoder("utf-8");
       let buffer = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        buffer += decoder.decode(value, { stream: true });
+          buffer += decoder.decode(value, { stream: true });
 
-        // SSE standard uses \r\n\r\n or \n\n to separate event blocks
-        const events = buffer.split(/\r?\n\r?\n/);
+          // SSE standard uses \r\n\r\n or \n\n to separate event blocks
+          const events = buffer.split(/\r?\n\r?\n/);
 
-        // L'ultimo elemento è un evento incompleto o una stringa vuota, lo teniamo nel buffer
-        buffer = events.pop() || '';
+          // L'ultimo elemento è un evento incompleto o una stringa vuota, lo teniamo nel buffer
+          buffer = events.pop() || '';
 
-        for (const eventBlock of events) {
-          if (!eventBlock.trim()) continue;
+          for (const eventBlock of events) {
+            if (!eventBlock.trim()) continue;
 
-          const lines = eventBlock.split(/\r?\n/);
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.substring(6);
-              if (dataStr) {
-                try {
-                  const parsed = JSON.parse(dataStr);
+            const lines = eventBlock.split(/\r?\n/);
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const dataStr = line.substring(6);
+                if (dataStr) {
+                  try {
+                    const parsed = JSON.parse(dataStr);
 
-                  if (parsed.type === "log" || parsed.type === "error") {
-                    setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${parsed.message}`]);
-                  } else if (parsed.type === "progress") {
-                    setProgress({ value: parsed.value, label: parsed.label, subtype: parsed.subtype });
-                  } else if (parsed.type === "done") {
-                    setResults(parsed.data);
-                    setIsScraping(false);
-                    setProgress({ value: 100, label: 'Completato!', subtype: 'done' });
-                    setPreviewCenter(null);
-                    fetchSearchHistory(selectedList);
+                    if (parsed.type === "log" || parsed.type === "error") {
+                      setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - ${parsed.message}`]);
+                    } else if (parsed.type === "progress") {
+                      setProgress({ value: parsed.value, label: parsed.label, subtype: parsed.subtype });
+                    } else if (parsed.type === "done") {
+                      receivedDone = true;
+                      setResults(parsed.data);
+                      setIsScraping(false);
+                      setProgress({ value: 100, label: 'Completato!', subtype: 'done' });
+                      setPreviewCenter(null);
+                      fetchSearchHistory(selectedList);
+                    }
+                  } catch (err) {
+                    console.error("Parse Error:", err, dataStr);
                   }
-                } catch (err) {
-                  console.error("Parse Error:", err, dataStr);
                 }
               }
             }
           }
         }
+      } finally {
+        // F2: Se lo stream chiude senza evento "done", sblocca la UI
+        if (!receivedDone) {
+          setIsScraping(false);
+          setProgress((prev) => prev.subtype !== 'done'
+            ? { value: 0, label: 'Stream interrotto senza completamento', subtype: 'error' }
+            : prev
+          );
+          setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - Stream terminato senza evento di completamento`]);
+        }
       }
 
     } catch (error) {
-      setLogs((prev) => [...prev, `[ERRORE DI RETE]: ${error.message}`]);
+      if (error.name === 'AbortError') {
+        setLogs((prev) => [...prev, `${new Date().toLocaleTimeString()} - Estrazione annullata`]);
+      } else {
+        setLogs((prev) => [...prev, `[ERRORE DI RETE]: ${error.message}`]);
+      }
       setIsScraping(false);
+    } finally {
+      if (scrapeControllerRef.current === controller) {
+        scrapeControllerRef.current = null;
+      }
     }
   };
 
