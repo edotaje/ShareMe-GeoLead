@@ -27,7 +27,7 @@ def _get_file_lock(filepath: str) -> threading.Lock:
 class CreateListRequest(BaseModel):
     name: str
 
-@router.get("/")
+@router.get("")
 def get_lists():
     """Returns a list of all available Excel files in the lists directory."""
     files = glob.glob(os.path.join(LISTS_DIR, "*.xlsx"))
@@ -35,7 +35,7 @@ def get_lists():
     file_names = [os.path.basename(f) for f in files]
     return file_names
 
-@router.post("/")
+@router.post("")
 def create_list(request: CreateListRequest):
     """Creates a new empty Excel file with the standard headers."""
     if not request.name:
@@ -273,4 +273,3 @@ def download_list(filename: str):
         filename=filename,
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     )
-
