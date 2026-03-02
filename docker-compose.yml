@@ -5,7 +5,7 @@ services:
     environment:
       - GOOGLE_MAPS_API_KEY=${GOOGLE_MAPS_API_KEY}
     volumes:
-      - /mnt/storage/geolead/lists:/app/data/lists
+      - ${LISTS_HOST_PATH:-./backend/data/lists}:/app/data/lists
     expose:
       - "8000"
 
