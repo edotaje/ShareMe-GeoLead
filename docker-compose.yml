@@ -5,7 +5,7 @@ services:
     env_file:
       - .env
     volumes:
-      - lists_data:/app/data/lists
+      - /mnt/storage/geolead/lists:/app/data/lists
     expose:
       - "8000"
 
@@ -16,6 +16,3 @@ services:
       - "80:80"
     depends_on:
       - backend
-
-volumes:
-  lists_data:
