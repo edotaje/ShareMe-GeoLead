@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Generator
 from openpyxl import load_workbook
 
-LISTS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "lists")
+LISTS_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "data", "lists"))
 
 class GoogleMapsScraperService:
     def __init__(self, api_key: str):
@@ -53,8 +53,16 @@ class GoogleMapsScraperService:
         """
         try:
             filename = list_name if list_name.endswith('.xlsx') else f"{list_name}.xlsx"
-            filepath = os.path.join(LISTS_DIR, filename)
-            
+            # Sanitize: only allow the basename, reject traversal attempts
+            clean_name = os.path.basename(filename)
+            if not clean_name or clean_name != filename:
+                yield {"type": "error", "message": "Nome lista non valido"}
+                return
+            filepath = os.path.realpath(os.path.join(LISTS_DIR, clean_name))
+            if not filepath.startswith(LISTS_DIR + os.sep):
+                yield {"type": "error", "message": "Nome lista non valido"}
+                return
+
             if not os.path.exists(filepath):
                 yield {"type": "error", "message": f"ERRORE: La lista '{filename}' non esiste."}
                 return

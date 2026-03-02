@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
+import asyncio
 import os
 import json
 from sse_starlette.sse import EventSourceResponse
@@ -48,11 +49,35 @@ async def scrape_locations(request: ScrapeRequest):
     
     try:
         scraper = GoogleMapsScraperService(api_key=api_key)
-        
+
         async def event_generator():
-            for event in scraper.run_scraping(request.city, request.radius, request.keywords, request.list_name, request.grid_step):
+            loop = asyncio.get_event_loop()
+            queue = asyncio.Queue()
+            _SENTINEL = object()
+
+            def _run_sync():
+                try:
+                    for event in scraper.run_scraping(
+                        request.city, request.radius, request.keywords,
+                        request.list_name, request.grid_step
+                    ):
+                        loop.call_soon_threadsafe(queue.put_nowait, event)
+                except Exception as exc:
+                    loop.call_soon_threadsafe(
+                        queue.put_nowait,
+                        {"type": "error", "message": f"ERRORE CRITICO: {exc}"}
+                    )
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, _SENTINEL)
+
+            loop.run_in_executor(None, _run_sync)
+
+            while True:
+                event = await queue.get()
+                if event is _SENTINEL:
+                    break
                 yield {"data": json.dumps(event)}
-                
+
         return EventSourceResponse(event_generator())
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

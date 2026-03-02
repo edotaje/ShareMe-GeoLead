@@ -12,10 +12,22 @@ from openpyxl import load_workbook
 
 router = APIRouter(prefix="/api/lists", tags=["lists"])
 
-LISTS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "lists")
+LISTS_DIR = os.path.realpath(os.path.join(os.path.dirname(__file__), "..", "data", "lists"))
 
 # Ensure the directory exists
 os.makedirs(LISTS_DIR, exist_ok=True)
+
+
+def _safe_filepath(filename: str) -> str:
+    """Resolve filename inside LISTS_DIR, rejecting any path traversal attempt."""
+    # Strip directory components — only the basename matters
+    clean = os.path.basename(filename)
+    if not clean or clean != filename:
+        raise HTTPException(status_code=400, detail="Nome file non valido")
+    filepath = os.path.realpath(os.path.join(LISTS_DIR, clean))
+    if not filepath.startswith(LISTS_DIR + os.sep):
+        raise HTTPException(status_code=400, detail="Nome file non valido")
+    return filepath
 
 # Per-file locks to prevent concurrent read-modify-write corruption
 _file_locks = defaultdict(threading.Lock)
@@ -40,10 +52,10 @@ def create_list(request: CreateListRequest):
     """Creates a new empty Excel file with the standard headers."""
     if not request.name:
         raise HTTPException(status_code=400, detail="Il nome della lista è obbligatorio")
-        
+
     # Ensure it ends with .xlsx
     filename = request.name if request.name.endswith('.xlsx') else f"{request.name}.xlsx"
-    filepath = os.path.join(LISTS_DIR, filename)
+    filepath = _safe_filepath(filename)
     
     if os.path.exists(filepath):
         raise HTTPException(status_code=409, detail=f"La lista '{filename}' esiste già")
@@ -63,7 +75,7 @@ def create_list(request: CreateListRequest):
 @router.get("/{filename}")
 def get_list_content(filename: str):
     """Returns the content of a specific Excel list as a JSON array."""
-    filepath = os.path.join(LISTS_DIR, filename)
+    filepath = _safe_filepath(filename)
     
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Lista non trovata")
@@ -97,7 +109,7 @@ def get_list_content(filename: str):
 @router.delete("/{filename}")
 def delete_list(filename: str):
     """Deletes a specific Excel list."""
-    filepath = os.path.join(LISTS_DIR, filename)
+    filepath = _safe_filepath(filename)
     
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Lista non trovata")
@@ -158,7 +170,7 @@ class UpdateNoteRequest(BaseModel):
 @router.put("/{filename}/note")
 def update_note(filename: str, request: UpdateNoteRequest):
     """Updates the Note field for a specific row in the Excel list."""
-    filepath = os.path.join(LISTS_DIR, filename)
+    filepath = _safe_filepath(filename)
 
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Lista non trovata")
@@ -197,7 +209,7 @@ class UpdateRowRequest(BaseModel):
 @router.put("/{filename}/row")
 def update_row(filename: str, request: UpdateRowRequest):
     """Updates a specific row in the Excel list based on Place_ID."""
-    filepath = os.path.join(LISTS_DIR, filename)
+    filepath = _safe_filepath(filename)
     
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Lista non trovata")
@@ -248,7 +260,7 @@ def update_row(filename: str, request: UpdateRowRequest):
 @router.get("/{filename}/searches")
 def get_searches(filename: str):
     """Returns the search history from the _ricerche sheet of the Excel list."""
-    filepath = os.path.join(LISTS_DIR, filename)
+    filepath = _safe_filepath(filename)
 
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Lista non trovata")
@@ -263,7 +275,7 @@ def get_searches(filename: str):
 @router.get("/{filename}/download")
 def download_list(filename: str):
     """Downloads the Excel file directly."""
-    filepath = os.path.join(LISTS_DIR, filename)
+    filepath = _safe_filepath(filename)
     
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Lista non trovata")
