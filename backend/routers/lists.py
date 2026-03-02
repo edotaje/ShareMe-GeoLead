@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from openpyxl import load_workbook
 
-router = APIRouter(prefix="/api/lists", tags=["lists"])
+router = APIRouter(prefix="/api/lists", tags=["lists"], redirect_slashes=False)
 
 LISTS_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "lists")
 
