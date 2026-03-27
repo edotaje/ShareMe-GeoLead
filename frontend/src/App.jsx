@@ -399,8 +399,6 @@ function App() {
     }
   };
 
-  const scrapeControllerRef = useRef(null);
-
   // F1: Cleanup - cancella lo stream SSE se il componente si smonta
   useEffect(() => {
     return () => {
@@ -445,7 +443,6 @@ function App() {
           keywords: keywords.split(',').map((k) => k.trim()).filter(k => k),
           list_name: selectedList
         }),
-        signal: controller.signal,
       });
 
       if (!response.ok) {
