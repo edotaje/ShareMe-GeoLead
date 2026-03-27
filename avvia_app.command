@@ -180,53 +180,53 @@ fi
 cd "$DIR"
 echo -e "${GREEN}Dipendenze Node.js installate.${NC}"
 
+# --- Build del frontend ---
+echo "Build del frontend in corso..."
+cd "$DIR/frontend" && npm run build
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Errore nel build del frontend!${NC}"
+    read -p "Premi Invio per chiudere..."
+    exit 1
+fi
+cd "$DIR"
+echo -e "${GREEN}Frontend compilato.${NC}"
+
 echo ""
 echo -e "${BLUE}=== Avvio dei servizi ===${NC}"
 
-# --- Avvio Backend ---
-echo "Avvio Backend (FastAPI)..."
-"$DIR/venv/bin/python" -m uvicorn main:app --reload --app-dir "$DIR/backend" &
+# --- Avvio Backend (serve anche il frontend) ---
+echo "Avvio app..."
+"$DIR/venv/bin/python" -m uvicorn main:app --app-dir "$DIR/backend" &
 BACKEND_PID=$!
 
 # Aspetta che il backend sia pronto
-echo "Attesa avvio backend..."
+echo "Attesa avvio..."
 for i in {1..20}; do
-    if curl -s http://127.0.0.1:8000/docs > /dev/null 2>&1; then
-        echo -e "${GREEN}Backend avviato con successo!${NC}"
+    if curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
+        echo -e "${GREEN}App avviata con successo!${NC}"
         break
     fi
     sleep 1
 done
 
-if ! curl -s http://127.0.0.1:8000/docs > /dev/null 2>&1; then
-    echo -e "${RED}Backend non raggiungibile su http://127.0.0.1:8000.${NC}"
+if ! curl -s http://127.0.0.1:8000/health > /dev/null 2>&1; then
+    echo -e "${RED}App non raggiungibile su http://127.0.0.1:8000.${NC}"
 fi
 
-# --- Avvio Frontend ---
-echo "Avvio Frontend (Vite)..."
-cd "$DIR/frontend" && npm run dev &
-FRONTEND_PID=$!
-cd "$DIR"
-
-# Aspetta che il frontend sia pronto e apri il browser
-sleep 3
-open http://localhost:5173
+open http://localhost:8000
 
 echo ""
 echo -e "${GREEN}=== App avviata! ===${NC}"
-echo "Backend:  http://127.0.0.1:8000"
-echo "Frontend: http://localhost:5173"
+echo "URL: http://localhost:8000"
 echo ""
 echo "Premi Ctrl+C per fermare tutto."
 
-# Gestione chiusura: termina entrambi i processi
+# Gestione chiusura
 cleanup() {
     echo ""
     echo "Chiusura servizi..."
     kill $BACKEND_PID 2>/dev/null
-    kill $FRONTEND_PID 2>/dev/null
     wait $BACKEND_PID 2>/dev/null
-    wait $FRONTEND_PID 2>/dev/null
     echo "Servizi terminati."
     exit 0
 }
