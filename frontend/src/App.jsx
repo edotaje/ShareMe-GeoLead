@@ -1286,10 +1286,10 @@ function App() {
               </div>
             ) : (
               <table className="results-table w-full text-sm dark:text-slate-400 text-slate-600 whitespace-nowrap">
-                <thead className="text-xs dark:text-slate-300 text-slate-700 uppercase dark:bg-slate-800/50 bg-slate-200/50 sticky top-0 text-center">
+                <thead className="text-xs dark:text-slate-300 text-slate-700 uppercase dark:bg-slate-800 bg-slate-200 sticky top-0 z-20 text-center">
                   <tr>
                     <th
-                      className="px-6 py-3 font-medium text-left cursor-pointer select-none dark:hover:text-white hover:text-slate-900 transition-colors group"
+                      className="px-6 py-3 font-medium text-left cursor-pointer select-none dark:hover:text-white hover:text-slate-900 transition-colors group sticky left-0 z-30 dark:bg-slate-800 bg-slate-200"
                       onClick={() => handleSort('Nome')}
                     >
                       <span className="flex items-center gap-1">
@@ -1334,8 +1334,8 @@ function App() {
                 </thead>
                 <tbody>
                   {displayedResults.map((r, i) => (
-                    <tr key={r.Place_ID || `row-${i}`} className={`border-b dark:border-slate-800 border-slate-200 dark:hover:bg-slate-800 hover:bg-slate-100/80 transition-colors ${r.Call ? 'dark:bg-slate-900 bg-slate-50/40 text-slate-500' : 'dark:bg-slate-900 bg-slate-50 dark:text-slate-400 text-slate-600'}`}>
-                      <td className="px-6 py-4 font-medium max-w-[200px] truncate text-left">
+                    <tr key={r.Place_ID || `row-${i}`} className={`group/row border-b dark:border-slate-800 border-slate-200 dark:hover:bg-slate-800 hover:bg-slate-100/80 transition-colors ${r.Call ? 'dark:bg-slate-900 bg-slate-50/40 text-slate-500' : 'dark:bg-slate-900 bg-slate-50 dark:text-slate-400 text-slate-600'}`}>
+                      <td className="px-6 py-4 font-medium max-w-[200px] truncate text-left sticky left-0 z-10 dark:bg-slate-900 bg-slate-50 dark:group-hover/row:bg-slate-800 group-hover/row:bg-slate-100/80">
                         <div className="flex items-center gap-2">
                           <span className={`${r.Call ? 'text-slate-500 line-through' : 'dark:text-slate-200 text-slate-800'} truncate block`} title={r.Nome}>{r.Nome}</span>
                           {r.Call && (

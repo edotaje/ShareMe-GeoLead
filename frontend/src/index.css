@@ -18,3 +18,14 @@
 .results-table-shell {
   contain: paint;
 }
+
+/* Sticky first column shadow separator */
+.results-table td:first-child,
+.results-table th:first-child {
+  box-shadow: 2px 0 4px -1px rgba(0, 0, 0, 0.08);
+}
+
+:is(.dark) .results-table td:first-child,
+:is(.dark) .results-table th:first-child {
+  box-shadow: 2px 0 4px -1px rgba(0, 0, 0, 0.3);
+}
