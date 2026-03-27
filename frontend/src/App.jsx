@@ -174,7 +174,7 @@ function App() {
 
   const fetchLists = async () => {
     try {
-      const resp = await fetch('/api/lists');
+      const resp = await fetch('/api/lists/');
       const data = await resp.json();
       setLists(data);
       if (data.length > 0 && !selectedList) {
