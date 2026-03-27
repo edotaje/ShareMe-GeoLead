@@ -148,3 +148,14 @@ async def geocode_location(q: str):
 @app.get("/health")
 def read_health():
     return {"status": "ok"}
+
+
+# --- Static frontend serving ---
+_DIST_DIR = os.path.join(os.path.dirname(__file__), '..', 'frontend', 'dist')
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def serve_spa(full_path: str):
+    file_path = os.path.join(_DIST_DIR, full_path)
+    if full_path and os.path.isfile(file_path):
+        return FileResponse(file_path)
+    return FileResponse(os.path.join(_DIST_DIR, 'index.html'))
