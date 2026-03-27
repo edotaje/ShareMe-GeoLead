@@ -128,15 +128,24 @@ class GoogleMapsScraperService:
                     pages_fetched = 0
                     
                     while pages_fetched < 3:
-                        if next_page_token:
-                            time.sleep(2)
-                            places_result = self.gmaps.places_nearby(
-                                location=(lat, lng), radius=search_radius_m, keyword=keyword, page_token=next_page_token
-                            )
-                        else:
-                            places_result = self.gmaps.places_nearby(
-                                location=(lat, lng), radius=search_radius_m, keyword=keyword
-                            )
+                        places_result = {"results": []}
+                        for attempt in range(2):
+                            try:
+                                if next_page_token:
+                                    time.sleep(2)
+                                    places_result = self.gmaps.places_nearby(
+                                        location=(lat, lng), radius=search_radius_m, keyword=keyword, page_token=next_page_token
+                                    )
+                                else:
+                                    places_result = self.gmaps.places_nearby(
+                                        location=(lat, lng), radius=search_radius_m, keyword=keyword
+                                    )
+                                break
+                            except Exception as api_err:
+                                if attempt == 0:
+                                    time.sleep(2)
+                                else:
+                                    yield {"type": "log", "message": f"Errore API punto ({lat:.4f},{lng:.4f}): {api_err}"}
 
                         results = places_result.get('results', [])
                         
@@ -194,19 +203,20 @@ class GoogleMapsScraperService:
                     
             yield {"type": "log", "message": f"Estrazione dettagli completata. Salvataggio in '{filename}'..."}
 
-            try:
-                # Import the shared file lock
-                from routers.lists import _get_file_lock
+            # Import the shared file lock
+            from routers.lists import _get_file_lock
 
-                with _get_file_lock(filepath):
+            # Perform all file I/O inside a single lock acquisition.
+            # No yield statements inside the lock to avoid holding it while suspended.
+            save_error = None
+            updated_df = None
+
+            with _get_file_lock(filepath):
+                try:
                     # Re-read existing data under lock to avoid lost updates
-                    try:
-                        existing_df = pd.read_excel(filepath)
-                        if 'Place_ID' not in existing_df.columns:
-                            existing_df['Place_ID'] = ''
-                    except Exception as e:
-                        yield {"type": "error", "message": f"Errore ri-lettura lista: {str(e)}"}
-                        return
+                    existing_df = pd.read_excel(filepath)
+                    if 'Place_ID' not in existing_df.columns:
+                        existing_df['Place_ID'] = ''
 
                     # Backup existing _ricerche sheet
                     searches_rows = []
@@ -254,13 +264,16 @@ class GoogleMapsScraperService:
                             os.remove(tmp_path)
                         raise
 
-                yield {"type": "log", "message": f"SUCCESSO: Aggiunti {len(final_results)} nuovi lead alla lista."}
+                except Exception as e:
+                    save_error = str(e)
 
+            # Yields happen after the lock is released
+            if save_error:
+                yield {"type": "error", "message": f"ERRORE salvataggio file Excel: {save_error}"}
+            else:
+                yield {"type": "log", "message": f"SUCCESSO: Aggiunti {len(final_results)} nuovi lead alla lista."}
                 # Return the updated full list to the frontend
                 yield {"type": "done", "data": updated_df.fillna('').to_dict(orient='records')}
-
-            except Exception as e:
-                yield {"type": "error", "message": f"ERRORE salvataggio file Excel: {str(e)}"}
 
         except Exception as e:
             yield {"type": "error", "message": f"ERRORE CRITICO: {str(e)}"}

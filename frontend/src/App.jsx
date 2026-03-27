@@ -115,6 +115,7 @@ function App() {
   const dropdownRef = useRef(null);
   const filterDropdownRef = useRef(null);
   const kwContainerRef = useRef(null);
+  const scrapeControllerRef = useRef(null);
   const [showKwSuggestions, setShowKwSuggestions] = useState(false);
 
   // Debounce radius e gridStep per evitare ricalcoli ad ogni keystroke
@@ -187,7 +188,7 @@ function App() {
   const fetchListData = async (filename) => {
     if (!filename) return;
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${filename}`);
+      const resp = await fetch(`http://localhost:8000/api/lists/${encodeURIComponent(filename)}`);
       if (resp.ok) {
         const data = await resp.json();
         setResults(data.data || []);
@@ -200,7 +201,7 @@ function App() {
   const fetchSearchHistory = async (filename) => {
     if (!filename) { setPastSearches([]); return; }
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${filename}/searches`);
+      const resp = await fetch(`http://localhost:8000/api/lists/${encodeURIComponent(filename)}/searches`);
       if (resp.ok) {
         const data = await resp.json();
         setPastSearches(data);
@@ -267,6 +268,14 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (scrapeControllerRef.current) {
+        scrapeControllerRef.current.abort();
+      }
+    };
+  }, []);
+
   const handleCreateList = async (e) => {
     e.preventDefault();
     if (!newListName) return;
@@ -301,7 +310,7 @@ function App() {
     if (!confirm2) return;
 
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${selectedList}`, {
+      const resp = await fetch(`http://localhost:8000/api/lists/${encodeURIComponent(selectedList)}`, {
         method: 'DELETE',
       });
 
@@ -334,7 +343,7 @@ function App() {
     );
 
     try {
-      const resp = await fetch(`http://localhost:8000/api/lists/${selectedList}/row`, {
+      const resp = await fetch(`http://localhost:8000/api/lists/${encodeURIComponent(selectedList)}/row`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -380,7 +389,7 @@ function App() {
   const saveNote = async (placeId, note) => {
     if (!selectedList || !placeId) return;
     try {
-      await fetch(`http://localhost:8000/api/lists/${selectedList}/note`, {
+      await fetch(`http://localhost:8000/api/lists/${encodeURIComponent(selectedList)}/note`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ place_id: placeId, note })
@@ -425,6 +434,7 @@ function App() {
     try {
       const response = await fetch('http://localhost:8000/api/scrape', {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
         },
@@ -509,8 +519,8 @@ function App() {
       } else {
         setLogs((prev) => [...prev, `[ERRORE DI RETE]: ${error.message}`]);
       }
-      setIsScraping(false);
     } finally {
+      setIsScraping(false);
       if (scrapeControllerRef.current === controller) {
         scrapeControllerRef.current = null;
       }
@@ -1327,7 +1337,7 @@ function App() {
                 </thead>
                 <tbody>
                   {displayedResults.map((r, i) => (
-                    <tr key={i} className={`border-b dark:border-slate-800 border-slate-200 dark:hover:bg-slate-800 hover:bg-slate-100/80 transition-colors ${r.Call ? 'dark:bg-slate-900 bg-slate-50/40 text-slate-500' : 'dark:bg-slate-900 bg-slate-50 dark:text-slate-400 text-slate-600'}`}>
+                    <tr key={r.Place_ID || `row-${i}`} className={`border-b dark:border-slate-800 border-slate-200 dark:hover:bg-slate-800 hover:bg-slate-100/80 transition-colors ${r.Call ? 'dark:bg-slate-900 bg-slate-50/40 text-slate-500' : 'dark:bg-slate-900 bg-slate-50 dark:text-slate-400 text-slate-600'}`}>
                       <td className="px-6 py-4 font-medium max-w-[200px] truncate text-left">
                         <div className="flex items-center gap-2">
                           <span className={`${r.Call ? 'text-slate-500 line-through' : 'dark:text-slate-200 text-slate-800'} truncate block`} title={r.Nome}>{r.Nome}</span>

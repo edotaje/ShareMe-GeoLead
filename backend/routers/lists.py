@@ -1,4 +1,5 @@
 import os
+import re
 import glob
 import shutil
 import tempfile
@@ -36,6 +37,23 @@ def _get_file_lock(filepath: str) -> threading.Lock:
     """Returns a lock specific to the given file path."""
     return _file_locks[os.path.normpath(filepath)]
 
+def _sanitize_filename(name: str) -> str:
+    """Removes dangerous characters from a list name. Returns the sanitized name (without .xlsx)."""
+    # Strip path separators and null bytes
+    name = name.replace("/", "").replace("\\", "").replace("\x00", "")
+    # Remove leading dots (hidden files)
+    name = name.lstrip(".")
+    # Keep only alphanumeric, spaces, hyphens, underscores, parentheses
+    name = re.sub(r"[^\w\s\-()]", "", name, flags=re.UNICODE)
+    # Collapse multiple spaces and strip
+    name = " ".join(name.split())
+    # Limit length
+    name = name[:100]
+    if not name:
+        raise HTTPException(status_code=400, detail="Il nome della lista non è valido.")
+    return name
+
+
 class CreateListRequest(BaseModel):
     name: str
 
@@ -53,8 +71,8 @@ def create_list(request: CreateListRequest):
     if not request.name:
         raise HTTPException(status_code=400, detail="Il nome della lista è obbligatorio")
 
-    # Ensure it ends with .xlsx
-    filename = request.name if request.name.endswith('.xlsx') else f"{request.name}.xlsx"
+    sanitized = _sanitize_filename(request.name.removesuffix(".xlsx"))
+    filename = f"{sanitized}.xlsx"
     filepath = _safe_filepath(filename)
     
     if os.path.exists(filepath):
