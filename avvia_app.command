@@ -194,6 +194,14 @@ echo -e "${GREEN}Frontend compilato.${NC}"
 echo ""
 echo -e "${BLUE}=== Avvio dei servizi ===${NC}"
 
+# Libera la porta 8000 se occupata da un'istanza precedente
+EXISTING_PID=$(lsof -ti:8000 2>/dev/null)
+if [ -n "$EXISTING_PID" ]; then
+    echo "Porta 8000 occupata (PID $EXISTING_PID). Chiudo il processo precedente..."
+    kill $EXISTING_PID 2>/dev/null
+    sleep 1
+fi
+
 # --- Avvio Backend (serve anche il frontend) ---
 echo "Avvio app..."
 "$DIR/venv/bin/python" -m uvicorn main:app --app-dir "$DIR/backend" &
