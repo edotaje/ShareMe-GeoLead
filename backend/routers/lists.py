@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from openpyxl import load_workbook
+from starlette.background import BackgroundTask
 
 router = APIRouter(prefix="/api/lists", tags=["lists"])
 
@@ -181,6 +182,30 @@ def _save_preserving_ricerche(filepath: str, df: pd.DataFrame):
         raise
 
 
+def _save_preserving_ricerche_into(source_filepath: str, df: pd.DataFrame, dest_path: str):
+    """Writes df to the main sheet of dest_path, copying the _ricerche sheet
+    from source_filepath. Does not modify source_filepath.
+    The caller MUST hold the file lock for source_filepath."""
+    searches_headers = []
+    searches_rows = []
+    try:
+        searches_df = pd.read_excel(source_filepath, sheet_name='_ricerche')
+        searches_headers = searches_df.columns.tolist()
+        searches_rows = searches_df.values.tolist()
+    except Exception:
+        pass  # Sheet doesn't exist
+
+    df.to_excel(dest_path, index=False, engine='openpyxl')
+
+    if searches_headers:
+        wb = load_workbook(dest_path)
+        ws = wb.create_sheet('_ricerche')
+        ws.append(searches_headers)
+        for row in searches_rows:
+            ws.append(row)
+        wb.save(dest_path)
+
+
 class UpdateNoteRequest(BaseModel):
     place_id: str
     note: str
@@ -292,15 +317,38 @@ def get_searches(filename: str):
 
 @router.get("/{filename}/download")
 def download_list(filename: str):
-    """Downloads the Excel file directly."""
+    """Downloads the Excel file, replacing the Place_ID column with the
+    direct Google Business (Maps) link for each lead."""
     filepath = _safe_filepath(filename)
-    
+
     if not os.path.exists(filepath):
         raise HTTPException(status_code=404, detail="Lista non trovata")
-        
+
+    try:
+        with _get_file_lock(filepath):
+            df = pd.read_excel(filepath)
+
+            # Replace Place_ID with the direct Google listing link.
+            if 'Place_ID' in df.columns:
+                df['Place_ID'] = df['Place_ID'].apply(
+                    lambda pid: f"https://www.google.com/maps/place/?q=place_id:{pid}"
+                    if pd.notna(pid) and str(pid).strip() else ''
+                )
+                df = df.rename(columns={'Place_ID': 'Link Google'})
+
+            # Build a temporary export file, preserving the _ricerche sheet.
+            fd, tmp_path = tempfile.mkstemp(suffix='.xlsx')
+            os.close(fd)
+            _save_preserving_ricerche_into(filepath, df, tmp_path)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Errore durante la generazione del file: {str(e)}")
+
     return FileResponse(
-        path=filepath,
+        path=tmp_path,
         filename=filename,
-        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        background=BackgroundTask(os.remove, tmp_path)
     )
 
