@@ -20,7 +20,7 @@ echo "Directory progetto: $DIR"
 REPO_URL="https://github.com/edotaje/ShareMe-GeoLead.git"
 
 # --- Server licenze (sviluppatore: metti qui il tuo sottodominio Cloudflare) ---
-LICENSE_SERVER_URL="https://CAMBIAMI.tuodominio.it"
+LICENSE_SERVER_URL="https://btlicense.btindustries.it"
 PRODUCT="GEOLEAD"
 
 # Controlla se Git è installato
