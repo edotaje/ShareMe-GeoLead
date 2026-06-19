@@ -19,6 +19,10 @@ echo "Directory progetto: $DIR"
 # --- Repository GitHub ---
 REPO_URL="https://github.com/edotaje/ShareMe-GeoLead.git"
 
+# --- Server licenze (sviluppatore: metti qui il tuo sottodominio Cloudflare) ---
+LICENSE_SERVER_URL="https://CAMBIAMI.tuodominio.it"
+PRODUCT="GEOLEAD"
+
 # Controlla se Git è installato
 if ! command -v git &> /dev/null; then
     echo "Git non trovato. Installazione in corso..."
@@ -48,14 +52,6 @@ if [ ! -d "$DIR/.git" ]; then
     git -C "$DIR" checkout -- .
     rm -rf "$TEMP_CLONE"
 
-    # Controlla che il .env esista
-    if [ ! -f "$DIR/.env" ]; then
-        echo -e "${RED}ATTENZIONE: file .env non trovato accanto a questo script!${NC}"
-        echo "L'app non funzionerà senza la chiave API di Google Maps."
-        read -p "Premi Invio per chiudere..."
-        exit 1
-    fi
-
     # Crea la cartella dati se non esiste
     mkdir -p "$DIR/backend/data/lists"
 
@@ -69,6 +65,79 @@ else
         echo -e "${BLUE}Nessun aggiornamento disponibile (o repository non raggiungibile).${NC}"
     fi
 fi
+
+# --- Configurazione (.env) ---
+# I campi vengono garantiti ad OGNI avvio: se mancano (o il file .env non esiste)
+# vengono chiesti e aggiunti, senza toccare gli altri valori già presenti.
+touch "$DIR/.env"
+
+# Legge il valore di una chiave dal .env (vuoto se assente)
+get_env_value() {
+    grep "^$1=" "$DIR/.env" | head -n1 | cut -d= -f2-
+}
+
+# Imposta/aggiorna una chiave nel .env (sostituisce se presente, aggiunge se assente)
+set_env_value() {
+    local key="$1" val="$2"
+    grep -v "^$key=" "$DIR/.env" > "$DIR/.env.tmp" 2>/dev/null || true
+    echo "$key=$val" >> "$DIR/.env.tmp"
+    mv "$DIR/.env.tmp" "$DIR/.env"
+}
+
+# Chiede un valore solo se la chiave manca/è vuota nel .env, poi lo salva
+ensure_env_value() {
+    local key="$1" prompt="$2"
+    if [ -n "$(get_env_value "$key")" ]; then
+        return
+    fi
+    local input=""
+    while [ -z "$input" ]; do
+        read -p "$prompt" input
+        [ -z "$input" ] && echo -e "${RED}Il valore non può essere vuoto. Riprova.${NC}"
+    done
+    set_env_value "$key" "$input"
+}
+
+ensure_env_value "GOOGLE_MAPS_API_KEY" "Incolla la tua GOOGLE_MAPS_API_KEY e premi Invio: "
+ensure_env_value "LICENSE_KEY" "Incolla il tuo CODICE LICENZA e premi Invio: "
+
+# --- Verifica licenza (1 licenza = 1 dispositivo) ---
+MACHINE_ID=$(ioreg -d2 -c IOPlatformExpertDevice 2>/dev/null | awk -F'"' '/IOPlatformUUID/{print $(NF-1)}')
+
+while true; do
+    LICENSE_KEY=$(get_env_value "LICENSE_KEY")
+    echo "Verifica licenza in corso..."
+    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+        -X POST "$LICENSE_SERVER_URL/validate" \
+        -H "Content-Type: application/json" \
+        -d "{\"license_key\":\"$LICENSE_KEY\",\"machine_id\":\"$MACHINE_ID\",\"product\":\"$PRODUCT\"}")
+
+    if [ "$HTTP_CODE" = "200" ]; then
+        echo -e "${GREEN}Licenza verificata.${NC}"
+        break
+    fi
+
+    if [ "$HTTP_CODE" = "403" ]; then
+        echo -e "${RED}Licenza non valida, disattivata, oppure già in uso su un altro dispositivo.${NC}"
+        read -p "Vuoi inserire un nuovo codice licenza? (s/n): " ANSWER
+        if [ "$ANSWER" = "s" ] || [ "$ANSWER" = "S" ]; then
+            NEW_KEY=""
+            while [ -z "$NEW_KEY" ]; do
+                read -p "Incolla il nuovo CODICE LICENZA e premi Invio: " NEW_KEY
+                [ -z "$NEW_KEY" ] && echo -e "${RED}Il codice licenza non può essere vuoto. Riprova.${NC}"
+            done
+            set_env_value "LICENSE_KEY" "$NEW_KEY"
+            continue
+        fi
+        read -p "Premi Invio per chiudere..."
+        exit 1
+    fi
+
+    # Errore di rete / server irraggiungibile: non è un problema di codice licenza
+    echo -e "${RED}Impossibile contattare il server delle licenze (codice $HTTP_CODE). Controlla la connessione e riprova.${NC}"
+    read -p "Premi Invio per chiudere..."
+    exit 1
+done
 
 ARCH="$(uname -m)"
 echo "Architettura Mac rilevata: $ARCH"

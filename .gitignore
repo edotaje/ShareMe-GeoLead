@@ -51,3 +51,6 @@ dist-ssr/
 
 # Build cache
 .cache/
+
+# License server: repository separato e privato
+license-server/
